@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "605869195310",
+    "project_id": "tkin-553c6",
+    "storage_bucket": "tkin-553c6.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:605869195310:android:a8f88547cd6d82ee3a1fbf",
+        "android_client_info": {
+          "package_name": "com.example.infinitebites"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZSt3Aa1jriIZ5l6NCHOTTzJ78LuY9Z14"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
