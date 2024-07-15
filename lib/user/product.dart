@@ -25,55 +25,113 @@ class ItemDetailScreen extends StatefulWidget {
 class _ItemDetailScreenState extends State<ItemDetailScreen> {
   int _selectedQuantity = 1;
   bool _isLoading = false;
-  int _selectedRating = 0;
-  Map<String, int> _ratingCounts = {
-    '1': 0,
-    '2': 0,
-    '3': 0,
-    '4': 0,
-    '5': 0,
-  };
-  double _averageRating = 0.0;
+  double _averageRating = 0;
+  int _totalRatings = 0;
+  int? _userRating;
+  String? _productId;
 
   @override
   void initState() {
     super.initState();
-    _loadRatings();
+    _fetchProductId();
   }
 
-  void _loadRatings() async {
-    try {
-      DocumentSnapshot snapshot = await FirebaseFirestore.instance
-          .collection('item_ratings')
-          .doc(widget.name)
-          .get();
+  Future<void> _fetchProductId() async {
+    final querySnapshot = await FirebaseFirestore.instance
+        .collection('products')
+        .where('name', isEqualTo: widget.name)
+        .limit(1)
+        .get();
 
-      if (snapshot.exists) {
-        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
-        setState(() {
-          _ratingCounts = {
-            '1': data['1'] ?? 0,
-            '2': data['2'] ?? 0,
-            '3': data['3'] ?? 0,
-            '4': data['4'] ?? 0,
-            '5': data['5'] ?? 0,
-          };
-          _calculateAverageRating();
-        });
-      }
-    } catch (e) {
-      print('Error loading ratings: $e');
+    if (querySnapshot.docs.isNotEmpty) {
+      setState(() {
+        _productId = querySnapshot.docs.first.id;
+        _fetchRatingInfo();
+        _fetchUserRating();
+      });
+    } else {
+      print('Product not found in Firestore');
     }
   }
 
-  void _calculateAverageRating() {
-    int totalRatings = _ratingCounts.values.reduce((a, b) => a + b);
-    int totalPoints = _ratingCounts.entries
-        .map((e) => int.parse(e.key) * e.value)
-        .reduce((a, b) => a + b);
-    setState(() {
-      _averageRating = totalRatings > 0 ? totalPoints / totalRatings : 0.0;
-    });
+  Future<void> _fetchRatingInfo() async {
+    if (_productId == null) return;
+
+    final productDoc = FirebaseFirestore.instance.collection('products').doc(_productId);
+    final docSnapshot = await productDoc.get();
+    if (docSnapshot.exists) {
+      final data = docSnapshot.data();
+      setState(() {
+        _averageRating = data?['averageRating']?.toDouble() ?? 0;
+        _totalRatings = data?['totalRatings'] ?? 0;
+      });
+    }
+  }
+
+  Future<void> _fetchUserRating() async {
+    if (_productId == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final ratingDoc = FirebaseFirestore.instance
+          .collection('user_ratings')
+          .doc(user.uid)
+          .collection('ratings')
+          .doc(_productId);
+      final docSnapshot = await ratingDoc.get();
+      if (docSnapshot.exists) {
+        setState(() {
+          _userRating = docSnapshot.data()?['rating'];
+        });
+      }
+    }
+  }
+
+  void _rateProduct(int rating) async {
+    if (_productId == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final userRatingDoc = FirebaseFirestore.instance
+          .collection('user_ratings')
+          .doc(user.uid)
+          .collection('ratings')
+          .doc(_productId);
+      final productDoc = FirebaseFirestore.instance.collection('products').doc(_productId);
+
+      FirebaseFirestore.instance.runTransaction((transaction) async {
+        final productSnapshot = await transaction.get(productDoc);
+        final ratingSnapshot = await transaction.get(userRatingDoc);
+
+        int totalRatings = productSnapshot.data()?['totalRatings'] ?? 0;
+        double averageRating = productSnapshot.data()?['averageRating']?.toDouble() ?? 0;
+
+        if (ratingSnapshot.exists) {
+          int oldRating = ratingSnapshot.data()?['rating'];
+          double newAverage = ((averageRating * totalRatings) - oldRating + rating) / totalRatings;
+          transaction.update(userRatingDoc, {'rating': rating});
+          transaction.update(productDoc, {'averageRating': newAverage});
+          setState(() {
+            _averageRating = newAverage;
+            _userRating = rating;
+          });
+        } else {
+          double newAverage = ((averageRating * totalRatings) + rating) / (totalRatings + 1);
+          transaction.set(userRatingDoc, {'rating': rating});
+          transaction.update(productDoc, {
+            'averageRating': newAverage,
+            'totalRatings': totalRatings + 1,
+          });
+          setState(() {
+            _averageRating = newAverage;
+            _totalRatings++;
+            _userRating = rating;
+          });
+        }
+      });
+    } else {
+      print('User is not authenticated');
+    }
   }
 
   @override
@@ -159,18 +217,28 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                   ],
                 ),
                 const SizedBox(height: 20.0),
-                _buildRatingStars(),
                 Text(
-                  'Average Rating: ${_averageRating.toStringAsFixed(1)} (${_ratingCounts.values.reduce((a, b) => a + b)} ratings)',
+                  'Average Rating: ${_averageRating.toStringAsFixed(1)} / 5',
+                  style: const TextStyle(fontSize: 18.0),
+                ),
+                Text(
+                  'Total Ratings: $_totalRatings',
                   style: const TextStyle(fontSize: 18.0),
                 ),
                 const SizedBox(height: 20.0),
-                ElevatedButton(
-                  onPressed: () {
-                    _rateProduct(context, _selectedRating);
-                  },
-                  child: const Text('Rate Product', style: TextStyle(color: Colors.black)),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (index) {
+                    return IconButton(
+                      onPressed: () {
+                        _rateProduct(index + 1);
+                      },
+                      icon: Icon(
+                        Icons.star,
+                        color: (index < (_userRating ?? 0)) ? Colors.yellow : Colors.grey,
+                      ),
+                    );
+                  }),
                 ),
                 const SizedBox(height: 80.0), // Space to push buttons to the bottom
               ],
@@ -228,27 +296,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
-  Widget _buildRatingStars() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(5, (index) {
-        return IconButton(
-          icon: Icon(
-            index < _selectedRating ? Icons.star : Icons.star_border,
-            color: Colors.amber,
-          ),
-          onPressed: () {
-            setState(() {
-              _selectedRating = index + 1;
-            });
-          },
-        );
-      }),
-    );
-  }
-
   void _addToCart(BuildContext context, int quantity) async {
-    if (quantity <= 0) {
+    if (quantity <= 0 || _productId == null) {
       return;
     }
 
@@ -364,88 +413,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       setState(() {
         _isLoading = false;
       });
-    }
-  }
-
-  void _rateProduct(BuildContext context, int rating) async {
-    if (rating < 1 || rating > 5) {
-      return;
-    }
-
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (user != null) {
-      final itemRatingDoc = FirebaseFirestore.instance.collection('item_ratings').doc(widget.name);
-      final userRatingDoc = FirebaseFirestore.instance.collection('user_ratings').doc('${user.uid}_${widget.name}');
-      final avgRatingDoc = FirebaseFirestore.instance.collection('average_ratings').doc(widget.name);
-
-      FirebaseFirestore.instance.runTransaction((transaction) async {
-        final userRatingSnapshot = await transaction.get(userRatingDoc);
-        int previousRating = 0;
-
-        if (userRatingSnapshot.exists) {
-          previousRating = userRatingSnapshot.data()?['rating'] ?? 0;
-        }
-
-        final itemRatingSnapshot = await transaction.get(itemRatingDoc);
-
-        if (itemRatingSnapshot.exists) {
-          Map<String, dynamic> data = itemRatingSnapshot.data() as Map<String, dynamic>;
-
-          if (previousRating != 0) {
-            data[previousRating.toString()] = (data[previousRating.toString()] ?? 1) - 1;
-          }
-
-          data[rating.toString()] = (data[rating.toString()] ?? 0) + 1;
-          transaction.update(itemRatingDoc, data);
-        } else {
-          transaction.set(
-            itemRatingDoc,
-            {
-              '1': rating == 1 ? 1 : 0,
-              '2': rating == 2 ? 1 : 0,
-              '3': rating == 3 ? 1 : 0,
-              '4': rating == 4 ? 1 : 0,
-              '5': rating == 5 ? 1 : 0,
-            },
-          );
-        }
-
-        transaction.set(
-          userRatingDoc,
-          {
-            'rating': rating,
-          },
-        );
-
-        // Update the rating counts and calculate the new average rating
-        setState(() {
-          if (previousRating != 0) {
-            _ratingCounts[previousRating.toString()] = (_ratingCounts[previousRating.toString()] ?? 1) - 1;
-          }
-          _ratingCounts[rating.toString()] = (_ratingCounts[rating.toString()] ?? 0) + 1;
-          _calculateAverageRating();
-        });
-
-        // Save the average rating in the new average_ratings collection
-        transaction.set(avgRatingDoc, {
-          'averageRating': _averageRating,
-          'totalRatings': _ratingCounts.values.reduce((a, b) => a + b),
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Thanks for rating!'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }).then((_) {
-        print('Rating transaction successful');
-      }).catchError((error) {
-        print('Rating transaction failed: $error');
-      });
-    } else {
-      print('User is not authenticated');
     }
   }
 }

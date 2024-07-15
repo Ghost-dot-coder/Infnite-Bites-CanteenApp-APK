@@ -25,7 +25,6 @@ shorebird.yaml
 key.properties
 app/google-services.json
 app/upload-keystore.jks
-lib/user/payment.dart
 
 
 # Flutter/Dart/Pub related

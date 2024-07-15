@@ -34,21 +34,12 @@ class _HomeTabState extends State<HomeTab> {
     return {'displayName': 'User', 'profileImageUrl': ''};
   }
 
-  Future<double> _fetchAverageRating(String productName) async {
-    final doc = await FirebaseFirestore.instance.collection('average_ratings').doc(productName).get();
-    if (doc.exists) {
-      final data = doc.data();
-      return data?['averageRating']?.toDouble() ?? 0.0;
-    }
-    return 0.0;
-  }
-
   Future<List<Map<String, dynamic>>> _fetchTopRatedProducts() async {
     final productsSnapshot = await FirebaseFirestore.instance.collection('products').get();
     List<Map<String, dynamic>> products = [];
     for (var doc in productsSnapshot.docs) {
       String productName = doc['name'];
-      double avgRating = await _fetchAverageRating(productName);
+      double avgRating = doc.data().containsKey('averageRating') ? doc['averageRating'].toDouble() : 0.0;
       products.add({
         'name': productName,
         'description': doc['description'],
@@ -183,29 +174,15 @@ class _HomeTabState extends State<HomeTab> {
                         itemBuilder: (context, index) {
                           final product = filteredProducts[index];
                           int quantity = product['quantity'] != null ? product['quantity'].toInt() : 0;
-                          return FutureBuilder<double>(
-                            future: _fetchAverageRating(product['name']),
-                            builder: (context, ratingSnapshot) {
-                              if (ratingSnapshot.connectionState == ConnectionState.waiting) {
-                                return const Padding(
-                                  padding: EdgeInsets.all(8.0),
-                                  //child: Center(child: CircularProgressIndicator()),
-                                );
-                              }
-                              if (ratingSnapshot.hasError) {
-                                return Center(child: Text('Error: ${ratingSnapshot.error}'));
-                              }
-                              double avgRating = ratingSnapshot.data ?? 0.0;
-                              return _buildMenuItem(
-                                context,
-                                product['name'],
-                                product['description'],
-                                product['imagePath'],
-                                product['price'].toDouble(),
-                                quantity,
-                                avgRating,
-                              );
-                            },
+                          double avgRating = product.data().containsKey('averageRating') ? product['averageRating'].toDouble() : 0.0;
+                          return _buildMenuItem(
+                            context,
+                            product['name'],
+                            product['description'],
+                            product['imagePath'],
+                            product['price'].toDouble(),
+                            quantity,
+                            avgRating,
                           );
                         },
                       );
